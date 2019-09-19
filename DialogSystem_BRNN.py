@@ -281,94 +281,40 @@ def encoding_layer(brnn_inputs, brnn_size, num_layers, keep_prob, sequence_lengt
 
 
 #--Decodificacion
-def decoding_layer_train(encoder_state, dec_cell, dec_embed_input, sequence_length, decoding_scope,
+def decoding_layer_train(encoder_state, dec_cell_present, dec_cell_past, dec_embed_input, sequence_length, decoding_scope,
                          output_fn, keep_prob, batch_size):
 
     
-    attention_states = tf.zeros([batch_size, 1, dec_cell.output_size])
+    attention_states = tf.zeros([batch_size, 1, dec_cell_present.output_size])
+    attention_states = tf.zeros([batch_size, 1, dec_cell_past.output_size])
     
     att_keys, att_vals, att_score_fn, att_construct_fn = \
         tf.contrib.seq2seq.prepare_attention(attention_states, attention_option="bahdanau", num_units=dec_cell.output_size)
 
-    train_decoder_fn = tf.contrib.seq2seq.attention_decoder_fn_train(encoder_state[0],
-                                                                     att_keys,
-                                                                     att_vals,
-                                                                     att_score_fn,
-                                                                     att_construct_fn,
-                                                                     name = "attn_dec_train")
-                                                                     train_pred, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(dec_cell,
-                                                                                                                               train_decoder_fn,
-                                                                                                                               dec_embed_input,
-                                                                                                                               sequence_length,
-                                                                                                                               scope=decoding_scope)
+    train_decoder_fn = tf.contrib.seq2seq.attention_decoder_fn_train(encoder_state[0], att_keys, att_vals, att_score_fn, att_construct_fn, name = "attn_dec_train")
+    train_pred, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(dec_cell_present, dec_cell_past, train_decoder_fn, dec_embed_input, sequence_length, scope=decoding_scope)
+
 train_pred_drop = tf.nn.dropout(train_pred, keep_prob)
 return output_fn(train_pred_drop)
 
-def decoding_layer_infer(encoder_state, dec_cell, dec_embeddings, start_of_sequence_id, end_of_sequence_id,
+def decoding_layer_infer(encoder_state, dec_cell_present, dec_cell_past, dec_embeddings, start_of_sequence_id, end_of_sequence_id,
                          maximum_length, vocab_size, decoding_scope, output_fn, keep_prob, batch_size):
     '''Decodificacion de datos'''
     
-    attention_states = tf.zeros([batch_size, 1, dec_cell.output_size])
+    attention_states = tf.zeros([batch_size, 1, dec_cell_present.output_size])
+    attention_states = tf.zeros([batch_size, 1, dec_cell_past.output_size])
     
     att_keys, att_vals, att_score_fn, att_construct_fn = tf.contrib.seq2seq.prepare_attention(attention_states, attention_option="bahdanau", num_units=dec_cell.output_size)
     
-    infer_decoder_fn = tf.contrib.seq2seq.attention_decoder_fn_inference(output_fn,
-                                                                         encoder_state[0],
-                                                                         att_keys,
-                                                                         att_vals,
-                                                                         att_score_fn,
-                                                                         att_construct_fn,
-                                                                         dec_embeddings,
-                                                                         start_of_sequence_id,
-                                                                         end_of_sequence_id,
-                                                                         maximum_length,
-                                                                         vocab_size,
-                                                                         name = "attn_dec_inf")
-                                                                         infer_logits, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(dec_cell,
-                                                                                                                                     infer_decoder_fn,
-                                                                                                                                     scope=decoding_scope)
+    infer_decoder_fn = tf.contrib.seq2seq.attention_decoder_fn_inference(output_fn,encoder_state[0], att_keys, att_vals, att_score_fn, att_construct_fn, dec_embeddings, start_of_sequence_id, end_of_sequence_id,maximum_length, vocab_size,name = "attn_dec_inf")
+    infer_logits, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(dec_cell,infer_decoder_fn, scope=decoding_scope)
                                                                          
     return infer_logits
 
 def decoding_layer(dec_embed_input, dec_embeddings, encoder_state, vocab_size, sequence_length, rnn_size,
                    num_layers, vocab_to_int, keep_prob, batch_size):
     '''Creando decodificacion'''
-    
-    with tf.variable_scope("decoding") as decoding_scope:
-        lstm = tf.contrib.rnn.BasicLSTMCell(rnn_size)
-        drop = tf.contrib.rnn.DropoutWrapper(lstm, input_keep_prob = keep_prob)
-        dec_cell = tf.contrib.rnn.MultiRNNCell([drop] * num_layers)
-        
-        weights = tf.truncated_normal_initializer(stddev=0.1)
-        biases = tf.zeros_initializer()
-        output_fn = lambda x: tf.contrib.layers.fully_connected(x,
-                                                                vocab_size,
-                                                                None,
-                                                                scope=decoding_scope,
-                                                                weights_initializer = weights,
-                                                                biases_initializer = biases)
-            
-                                                                train_logits = decoding_layer_train(encoder_state,
-                                                                                                    dec_cell,
-                                                                                                    dec_embed_input,
-                                                                                                    sequence_length,
-                                                                                                    decoding_scope,
-                                                                                                    output_fn,
-                                                                                                    keep_prob,
-                                                                                                    batch_size)
-                                                                decoding_scope.reuse_variables()
-                                                                infer_logits = decoding_layer_infer(encoder_state,
-                                                                                                    dec_cell,
-                                                                                                    dec_embeddings,
-                                                                                                    vocab_to_int['<GO>'],
-                                                                                                    vocab_to_int['<EOS>'],
-                                                                                                    sequence_length - 1,
-                                                                                                    vocab_size,
-                                                                                                    decoding_scope,
-                                                                                                    output_fn, keep_prob,
-                                                                                                    batch_size)
-
-return train_logits, infer_logits
+   
 
 def seq2seq_model(input_data, target_data, keep_prob, batch_size, sequence_length, answers_vocab_size,
                   questions_vocab_size, enc_embedding_size, dec_embedding_size, rnn_size, num_layers,
